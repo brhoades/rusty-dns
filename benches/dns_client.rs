@@ -7,6 +7,12 @@ use trust_dns_client::op::DnsResponse;
 use trust_dns_client::rr::{DNSClass, Name, RData, Record, RecordType};
 use trust_dns_client::udp::UdpClientConnection;
 
+/*
+mod relative_walltime;
+use relative_walltime::RelativeWallTime;
+*/
+
+#[allow(dead_code)]
 fn sys_resolve(r: &str) -> Result<Option<std::net::IpAddr>, failure::Error> {
     use trust_dns_resolver::config::*;
     use trust_dns_resolver::Resolver;
@@ -60,7 +66,7 @@ fn dns_resolve(r: &str, server: &str) -> Result<Option<std::net::IpAddr>, failur
     return Ok(None);
 }
 
-fn dns(c: &mut Criterion) {
+fn rawdns(c: &mut Criterion) {
     let server = "127.0.0.1:14582";
     let cloudflare = "1.1.1.1:53";
 
@@ -69,27 +75,65 @@ fn dns(c: &mut Criterion) {
     runtime.spawn(bg);
 
     c.bench_function("rusty-dns", |b| {
-        b.iter(|| match dns_resolve("google.com", server) {
-            Ok(Some(_)) => (),
-            Ok(None) => (),
-            Err(e) => panic!("Error in resolution: {}", e),
-        })
+        b.iter(|| dns_resolve("google.com", server))
     });
-    c.bench_function("baseline: 1.1.1.1", |b| {
-        b.iter(|| match dns_resolve("google.com", cloudflare) {
-            Ok(Some(_)) => (),
-            Ok(None) => panic!("failed to resolve"),
-            Err(e) => panic!("ERROR: {}", e),
-        })
-    });
-    c.bench_function("baseline: system", |b| {
-        b.iter(|| match sys_resolve("google.com") {
-            Ok(Some(_)) => (),
-            Ok(None) => panic!("failed to resolve"),
-            Err(e) => panic!("ERROR: {}", e),
-        })
+
+    c.bench_function("system", |b| {
+        b.iter(|| dns_resolve("google.com", cloudflare))
     });
 }
 
-criterion_group!(benches, dns);
+fn custom_criterion() -> Criterion {
+    Criterion::default().measurement_time(std::time::Duration::from_secs(30))
+}
+
+/*
+fn relativedns(c: &mut Criterion<RelativeWallTime>) {
+    let server = "127.0.0.1:14582";
+    let cloudflare = "1.1.1.1:53";
+
+    let bg = rusty_dns::bind(server, cloudflare);
+    let runtime = Runtime::new().unwrap();
+    runtime.spawn(bg);
+
+    c.bench_function("relative rusty-dns", |b| {
+        b.iter(|| match dns_resolve("google.com", server) {
+            Ok(Some(_)) => (),
+            _ => (),
+        })
+    });
+}
+    b.iter(|| match dns_resolve("google.com", server) {
+        Ok(Some(_)) => {},
+        Ok(None) => panic!("failed to resolve"),
+        Err(e) => panic!("Error in resolution: {}", e),
+    });
+});
+c.bench_function("baseline: system", |b| {
+    b.iter(|| match sys_resolve("google.com") {
+        Ok(Some(_)) => (),
+        Ok(None) => panic!("failed to resolve"),
+        Err(e) => panic!("ERROR: {}", e),
+    })
+});
+
+fn alternate_measurement() -> Criterion<RelativeWallTime> {
+    Criterion::default().with_measurement(
+        RelativeWallTime::new(|| -> Result<Option<_>, Error> { sys_resolve("google.com") })
+            .unwrap(),
+    )
+}
+                 */
+
+criterion_group! {
+    name = benches;
+    config = custom_criterion();
+    targets = rawdns
+}
+/*criterion_group! {
+    name = relativebenches;
+    config = alternate_measurement();
+    targets = relativedns
+}*/
+
 criterion_main!(benches);
