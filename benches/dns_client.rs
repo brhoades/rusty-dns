@@ -62,7 +62,9 @@ fn dns_resolve(r: &str, server: &str) -> Result<Option<std::net::IpAddr>, failur
 
 fn dns(c: &mut Criterion) {
     let server = "127.0.0.1:14582";
-    let bg = rusty_dns::bind(server);
+    let cloudflare = "1.1.1.1:53";
+
+    let bg = rusty_dns::bind(server, cloudflare);
     let runtime = Runtime::new().unwrap();
     runtime.spawn(bg);
 
@@ -74,7 +76,7 @@ fn dns(c: &mut Criterion) {
         })
     });
     c.bench_function("baseline: 1.1.1.1", |b| {
-        b.iter(|| match dns_resolve("google.com", "1.1.1.1:53") {
+        b.iter(|| match dns_resolve("google.com", cloudflare) {
             Ok(Some(_)) => (),
             Ok(None) => panic!("failed to resolve"),
             Err(e) => panic!("ERROR: {}", e),

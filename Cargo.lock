@@ -926,6 +926,7 @@ dependencies = [
  "failure",
  "tokio",
  "trust-dns-client",
+ "trust-dns-proto",
  "trust-dns-resolver",
 ]
 
