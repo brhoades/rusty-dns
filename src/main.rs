@@ -1,5 +1,4 @@
 use rusty_dns::bind;
-use tokio::prelude::*;
 
 #[tokio::main]
 async fn main() -> std::io::Result<()> {

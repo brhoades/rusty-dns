@@ -7,8 +7,25 @@ use trust_dns_client::op::DnsResponse;
 use trust_dns_client::rr::{DNSClass, Name, RData, Record, RecordType};
 use trust_dns_client::udp::UdpClientConnection;
 
+fn sys_resolve(r: &str) -> Result<Option<std::net::IpAddr>, failure::Error> {
+    use trust_dns_resolver::config::*;
+    use trust_dns_resolver::Resolver;
+
+    // Construct a new Resolver with default configuration options
+    let resolver = Resolver::new(ResolverConfig::default(), ResolverOpts::default())?;
+
+    // Lookup the IP addresses associated with a name.
+    // The final dot forces this to be an FQDN, otherwise the search rules as specified
+    //  in `ResolverOpts` will take effect. FQDN's are generally cheaper queries.
+    let response = resolver.lookup_ip(r)?;
+
+    // There can be many addresses associated with the name,
+    //  this can return IPv4 and/or IPv6 addresses
+    return Ok(response.iter().next());
+}
+
 // sync resolver
-fn resolve(r: &str, server: &str) -> Result<Option<std::net::Ipv4Addr>, failure::Error> {
+fn dns_resolve(r: &str, server: &str) -> Result<Option<std::net::IpAddr>, failure::Error> {
     let address = server.parse()?;
     let conn = UdpClientConnection::new(address)?;
 
@@ -37,31 +54,40 @@ fn resolve(r: &str, server: &str) -> Result<Option<std::net::Ipv4Addr>, failure:
     //  In order to access it we need to first check what type of record it is
     //  In this case we are interested in A, IPv4 address
     if let &RData::A(ref ip) = answers[0].rdata() {
-        return Ok(Some(*ip));
+        return Ok(Some(std::net::IpAddr::V4(*ip)));
     }
 
     return Ok(None);
 }
 
-fn criterion_benchmark(c: &mut Criterion) {
+fn dns(c: &mut Criterion) {
     let server = "127.0.0.1:14582";
     let bg = rusty_dns::bind(server);
     let runtime = Runtime::new().unwrap();
     runtime.spawn(bg);
 
-    c.bench_function("my dns", |b| {
-        b.iter(|| match resolve("google.com", server) {
-            Ok(_) => (),
-            Err(e) => println!("ERROR: {}", e),
+    c.bench_function("rusty-dns", |b| {
+        b.iter(|| match dns_resolve("google.com", server) {
+            Ok(Some(_)) => (),
+            Ok(None) => (),
+            Err(e) => panic!("Error in resolution: {}", e),
         })
     });
     c.bench_function("baseline: 1.1.1.1", |b| {
-        b.iter(|| match resolve("google.com", "1.1.1.1:53") {
-            Ok(_) => (),
-            Err(e) => println!("ERROR: {}", e),
+        b.iter(|| match dns_resolve("google.com", "1.1.1.1:53") {
+            Ok(Some(_)) => (),
+            Ok(None) => panic!("failed to resolve"),
+            Err(e) => panic!("ERROR: {}", e),
+        })
+    });
+    c.bench_function("baseline: system", |b| {
+        b.iter(|| match sys_resolve("google.com") {
+            Ok(Some(_)) => (),
+            Ok(None) => panic!("failed to resolve"),
+            Err(e) => panic!("ERROR: {}", e),
         })
     });
 }
 
-criterion_group!(benches, criterion_benchmark);
+criterion_group!(benches, dns);
 criterion_main!(benches);

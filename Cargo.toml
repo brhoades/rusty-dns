@@ -16,6 +16,7 @@ failure = "0.1"
 
 [dev-dependencies]
 criterion = "0.3"
+trust-dns-resolver = "0.19.2"
 
 [[bench]]
 name = "dns_client"
