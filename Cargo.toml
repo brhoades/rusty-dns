@@ -1,0 +1,24 @@
+[package]
+name = "rusty-dns"
+version = "0.1.0"
+authors = ["Billy Rhoades <me@brod.es>"]
+edition = "2018"
+
+[lib]
+name = "rusty_dns"
+
+# See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
+
+[dependencies]
+tokio = { version = "0.2", features = ["full"] }
+trust-dns-client = { version = "*", default-features = false }
+failure = "0.1"
+
+[dev-dependencies]
+criterion = "0.3"
+
+[[bench]]
+name = "dns_client"
+harness = false
+
+
