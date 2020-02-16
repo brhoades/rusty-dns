@@ -1,18 +1,14 @@
+use std::net::ToSocketAddrs;
+
 use failure::{format_err, Error};
-use std::env;
-use std::str::FromStr;
+use log::*;
 
 use tokio::net::UdpSocket;
-use tokio::runtime::Runtime;
+use trust_dns_proto::op::Message;
 
-use trust_dns_client::client::{AsyncClient, ClientHandle};
-use trust_dns_client::rr::{DNSClass, Name, RData, RecordType};
-use trust_dns_client::udp::UdpClientStream;
+mod cache;
 
-pub async fn bind<A: std::net::ToSocketAddrs + std::fmt::Debug>(
-    server: A,
-    remote: A,
-) -> Result<(), failure::Error> {
+pub async fn bind<A: ToSocketAddrs + std::fmt::Debug>(server: A, remote: A) -> Result<(), Error> {
     let serveraddr = server
         .to_socket_addrs()?
         .next()
@@ -22,13 +18,31 @@ pub async fn bind<A: std::net::ToSocketAddrs + std::fmt::Debug>(
         .to_socket_addrs()?
         .next()
         .ok_or_else(|| format_err!("error parsing remote {:?}", remote))?;
-    println!("Listening on {}", socket.local_addr()?);
+    info!("Listening on {}", socket.local_addr()?);
+
+    let mut cache = cache::HostCache::new(1024);
 
     loop {
         let mut buf = vec![0u8; 512];
         let (recv, peer) = socket.recv_from(&mut buf).await?;
         let resp = match trust_dns_proto::op::message::Message::from_vec(&buf[..recv]) {
-            Ok(m) => dns_forward(&remoteaddr, m.to_vec()?).await?,
+            Ok(m) => {
+                let query = m.queries().get(0).unwrap();
+                info!(
+                    "-> ? {} {} {}",
+                    query.query_type(),
+                    query.query_class(),
+                    query.name()
+                );
+                match cache.get_ip(query) {
+                    Some(r) => r.clone().set_id(m.id()).to_vec()?,
+                    None => {
+                        let res = dns_forward(&remoteaddr, m.to_vec()?).await?;
+                        cache.set_ip(query.clone(), res);
+                        cache.get_ip(query).unwrap().to_vec()?
+                    }
+                }
+            }
             Err(e) => {
                 println!("error: {}", e);
                 trust_dns_proto::op::message::Message::error_msg(
@@ -36,10 +50,10 @@ pub async fn bind<A: std::net::ToSocketAddrs + std::fmt::Debug>(
                     trust_dns_proto::op::op_code::OpCode::Query,
                     trust_dns_proto::op::response_code::ResponseCode::ServFail,
                 )
-                .to_vec()
-                .expect("created invalid error response")
+                .to_vec()?
             }
         };
+
         socket.send_to(&resp[..], &peer).await?;
     }
 }
@@ -47,8 +61,8 @@ pub async fn bind<A: std::net::ToSocketAddrs + std::fmt::Debug>(
 pub async fn dns_forward(
     remote: &std::net::SocketAddr,
     message: Vec<u8>,
-) -> Result<Vec<u8>, failure::Error> {
-    let mut socket = UdpSocket::bind("0.0.0.0:0")
+) -> Result<Message, Error> {
+    let mut socket = UdpSocket::bind("0.0.0.0:0".to_socket_addrs()?.next().unwrap())
         .await
         .map_err(|e| format_err!("error when binding local udp socket: {}", e))?;
     socket
@@ -58,48 +72,5 @@ pub async fn dns_forward(
     let mut data = vec![0u8; 512];
     socket.recv(&mut data).await?;
 
-    Ok(data)
-}
-
-pub async fn resolve(
-    r: &str,
-    server: &str,
-) -> Result<trust_dns_proto::xfer::dns_response::DnsResponse, Error> {
-    let server_address = server.parse()?;
-    let mut runtime = Runtime::new()?;
-
-    // We need a connection, TCP and UDP are supported by DNS servers
-    //   (tcp construction is slightly different as it needs a multiplexer)
-    let stream = UdpClientStream::<UdpSocket>::new(server_address);
-
-    // Create a new client, the bg is a background future which handles
-    //   the multiplexing of the DNS requests to the server.
-    //   the client is a handle to an unbounded queue for sending requests via the
-    //   background. The background must be scheduled to run before the client can
-    //   send any dns requests
-    let client = AsyncClient::connect(stream);
-    let (mut client, bg) = runtime.block_on(client)?;
-    tokio::spawn(bg);
-
-    // Create a query future
-    match client
-        .query(
-            Name::from_str(format!("{}.", r).as_str())?,
-            DNSClass::IN,
-            RecordType::A,
-        )
-        .await
-    {
-        Ok(v) => Ok(v),
-        Err(e) => Err(format_err!("error: {}", e)),
-    }
-
-    /*
-    // validate it's what we expected
-    if let &RData::A(addr) = response.answers()[0].rdata() {
-        Ok(Some(addr))
-    } else {
-        Ok(None)
-    }
-    */
+    Ok(Message::from_vec(&data)?)
 }
