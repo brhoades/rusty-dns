@@ -1,6 +1,7 @@
 use std::env;
 use rusty_dns::bind;
-use pretty_env_logger;
+
+use lru_cache::LruCache;
 
 #[tokio::main]
 async fn main() -> Result<(), failure::Error> {
@@ -14,5 +15,6 @@ async fn main() -> Result<(), failure::Error> {
         .nth(2)
         .unwrap_or_else(|| "1.1.1.1:53".into())
         .parse()?;
-    bind(&bind_addr, &remote_addr).await
+    let cache = LruCache::new(1024);
+    bind(&bind_addr, &remote_addr, cache).await
 }

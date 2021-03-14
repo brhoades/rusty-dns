@@ -1,4 +1,5 @@
 use criterion::{criterion_group, criterion_main, Criterion};
+use lru_cache::LruCache;
 use std::str::FromStr;
 use tokio::runtime::Runtime;
 
@@ -67,24 +68,37 @@ fn dns_resolve(r: &str, server: &str) -> Result<Option<std::net::IpAddr>, failur
 }
 
 fn rawdns(c: &mut Criterion) {
-    let server = "127.0.0.1:14582";
     let cloudflare = "1.1.1.1:53";
-
-    let bg = rusty_dns::bind(server, cloudflare);
+    let mut group = c.benchmark_group("dns");
     let runtime = Runtime::new().unwrap();
-    runtime.spawn(bg);
 
-    c.bench_function("rusty-dns", |b| {
-        b.iter(|| dns_resolve("google.com", server))
+    let lru_server = "127.0.0.1:14582";
+    runtime.spawn(rusty_dns::bind(lru_server, cloudflare, LruCache::new(1024)));
+
+    let hm_server = "127.0.0.1:14583";
+    runtime.spawn(rusty_dns::bind(
+        hm_server,
+        cloudflare,
+        std::collections::HashMap::new(),
+    ));
+
+    group.bench_function("single record lrucache", |b| {
+        b.iter(move || dns_resolve("google.com", lru_server))
     });
 
-    c.bench_function("system", |b| {
-        b.iter(|| dns_resolve("google.com", cloudflare))
+    group.bench_function("single record hashmap", |b| {
+        b.iter(move || dns_resolve("google.com", hm_server))
+    });
+
+    group.bench_function("system", |b| {
+        b.iter(move || dns_resolve("google.com", cloudflare))
     });
 }
 
 fn custom_criterion() -> Criterion {
-    Criterion::default().measurement_time(std::time::Duration::from_secs(30))
+    Criterion::default()
+        .measurement_time(std::time::Duration::from_secs(30))
+        .noise_threshold(0.05) // easily get 5% jitter due to network
 }
 
 /*

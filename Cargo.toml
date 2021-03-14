@@ -10,13 +10,15 @@ name = "rusty_dns"
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
 
 [dependencies]
-tokio = { version = "0.2", features = ["udp", "rt-threaded", "rt-core", "macros"] }
-trust-dns-proto = "0.19.2"
-failure = "0.1"
+tokio = { version = "0.2", features = ["udp", "rt-threaded", "rt-core", "macros", "sync"] }
 lru-cache = "0.1"
+nom = "5.1"
+
+async-trait = "0.1"
+
+failure = "0.1"
 log = "0.4"
 pretty_env_logger = "0.3"
-
 [dev-dependencies]
 criterion = "0.3"
 trust-dns-client = { version = "*", default-features = false }
